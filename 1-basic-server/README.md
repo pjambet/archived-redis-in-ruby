@@ -281,6 +281,186 @@ Note: If you do not have `gcc` installed your machine, you can install in on mac
 `xcode-select --install`, if you're on a different OS, I'll let you search, this should be a fairly common questions and
 have lots of answers on stackoverflow and the likes.
 
+The code I'm sharing here is a simplified version of the client/server code available on
+[GeeksforGeeks](https://www.geeksforgeeks.org/tcp-server-client-implementation-in-c/):
+
+Server:
+
 ``` c
-#include <stdio.h>
+#include <stdio.h> // For printf
+#include <netdb.h> // For bind, listen, AF_INET, SOCK_STREAM, socklen_t, sockaddr_in, INADDR_ANY
+#include <stdlib.h> // For exit
+#include <string.h> // For bzero
+#include <unistd.h> // For close & write
+#include <errno.h> // For errno, duh!
+#include <arpa/inet.h> // For inet_ntop
+
+#define MAX 80
+#define PORT 2000
+#define SA struct sockaddr
+
+int main()
+{
+    socklen_t client_address_length;
+    int server_socket_file_descriptor, client_socket_file_descriptor;
+    struct sockaddr_in server_address, client_address;
+
+    // socket create and verification
+    server_socket_file_descriptor = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket_file_descriptor == -1) {
+        printf("socket creation failed...\n");
+        exit(0);
+    }
+    else {
+        printf("Socket successfully created..\n");
+    }
+    bzero(&server_address, sizeof(server_address));
+
+    // assign IP, PORT
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_address.sin_port = htons(PORT);
+
+    // Binding newly created socket to given IP and verification
+    if ((bind(server_socket_file_descriptor, (SA*)&server_address, sizeof(server_address))) != 0) {
+        printf("socket bind failed... : %d, %d\n", server_socket_file_descriptor, errno);
+        exit(0);
+    }
+    else {
+        printf("Socket successfully binded..\n");
+    }
+
+    // Now server is ready to listen and verification
+    if ((listen(server_socket_file_descriptor, 5)) != 0) {
+        printf("Listen failed...\n");
+        exit(0);
+    }
+    else {
+        printf("Server listening..\n");
+    }
+    client_address_length = sizeof(client_address);
+
+    // Accept the data packet from client and verification
+    client_socket_file_descriptor = accept(server_socket_file_descriptor, (SA*)&client_address, &client_address_length);
+    if (client_socket_file_descriptor < 0) {
+        printf("server acccept failed: %d,%d...\n", client_socket_file_descriptor, errno);
+        exit(0);
+    }
+    else {
+        printf("server acccept the client...\n");
+        char human_readable_address[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_address.sin_addr, human_readable_address, sizeof(human_readable_address));
+        printf("Client address: %s\n", human_readable_address);
+    }
+
+    char message_buffer[MAX];
+    read(client_socket_file_descriptor, message_buffer, sizeof(message_buffer));
+    printf("From Client: %s\n", message_buffer);
+    bzero(message_buffer, MAX);
+
+    strcpy(message_buffer, "Hello, this is Server!");
+    write(client_socket_file_descriptor, message_buffer, sizeof(message_buffer));
+
+    // After chatting close the socket
+    printf("Closing server_socket_file_descriptor\n");
+    close(server_socket_file_descriptor);
+}
 ```
+
+Client:
+
+``` c
+#include <stdio.h> // For printf
+#include <netdb.h> // For AF_INET, SOCK_STREAM, sockaddr_in
+#include <stdlib.h> // For exit
+#include <string.h> // For bzero
+#include <sys/socket.h> // For connect
+#include <arpa/inet.h> // For inet_addr
+#include <unistd.h> // for close
+
+#define MAX 80
+#define PORT 2000
+#define SA struct sockaddr
+
+int main() {
+    int server_socket_file_descriptor;
+    struct sockaddr_in server_address;
+
+    // socket create and varification
+    server_socket_file_descriptor = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket_file_descriptor == -1) {
+        printf("socket creation failed...\n");
+        exit(0);
+    }
+    else {
+        printf("Socket successfully created..\n");
+    }
+
+    bzero(&server_address, sizeof(server_address));
+
+    // assign IP, PORT
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = inet_addr("127.0.0.1");
+    server_address.sin_port = htons(PORT);
+
+    // connect the client socket to server socket
+    if (connect(server_socket_file_descriptor, (SA*)&server_address, sizeof(server_address)) != 0) {
+        printf("connection with the server failed...\n");
+        exit(0);
+    }
+    else {
+        printf("connected to the server..\n");
+    }
+
+    char message_buffer[MAX] = "Hello, this is Client";
+    write(server_socket_file_descriptor, message_buffer, sizeof(message_buffer));
+    bzero(message_buffer, sizeof(message_buffer));
+    read(server_socket_file_descriptor, message_buffer, sizeof(message_buffer));
+    printf("From Server: %s", message_buffer);
+
+    // close the socket
+    close(server_socket_file_descriptor);
+}
+```
+
+As usual, let's run a few manual tests, but since this is C, we first need to compile this:
+
+``` bash
+$ gcc server.c -o server
+$ gcc client.c -o client
+```
+
+We're going to need to shells, start the server in the first one, `./server`. It should log the following:
+
+``` bash
+Socket successfully created..
+Socket successfully binded..
+Server listening..
+```
+
+Note that, as we saw previously when creating a server from Ruby, it is "hanging" and hasn't returned yet. In the other
+shell, run the client: `./client`, you should see the following output:
+
+``` bash
+$ ./client
+Socket successfully created..
+connected to the server..
+From Server: Hello, this is Server!
+```
+
+And if you return to the other shell, where the server was running, you can see that it now returned and log a few more
+things before doing so:
+
+``` bash
+server acccept the client...
+Client address: 127.0.0.1
+From Client: Hello, this is Client
+Closing server_socket_file_descriptor
+```
+
+It works! A server, that waits until a client connects, reads what the client sent and writes a message back, and once
+all of that is done, exits.
+
+Doing a step by step walkthrough of the client and server code is both a little bit out of scope and frankly something
+that I am not really capable of doing at the moment. That being said, I thought it would be interesting to visualize a
+similar-ish implementation to get a rough idea of what Ruby does for us under the hood.
